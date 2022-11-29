@@ -1,0 +1,28 @@
+# Comments to be ignored. As with following blank line.
+# Must test every combination of:
+# GLOBAL, LOCAL, GROUP, SCORE
+
+Lorem 1 GLOBAL LOCAL group # 1, 1, 1, 1
+ipsum 0 GLOBAL LOCAL group # 1, 1, 1, 0
+dolor GLOBAL LOCAL group # 1, 1, 1, undef
+sit 1 GLOBAL LOCAL # 1, 1, 0, 1
+amet 0 GLOBAL LOCAL # 1, 1, 0, 0
+consectetur GLOBAL LOCAL # 1, 1, 0, undef
+adipiscing 1 GLOBAL group # 1, 0, 1, 1
+elit 0 GLOBAL group # 1, 0, 1, 0
+sed GLOBAL group # 1, 0, 1, undef
+do 1 GLOBAL # 1, 0, 0, 1
+eiusmod 0 GLOBAL # 1, 0, 0, 0
+tempor GLOBAL # 1, 0, 0, undef
+incididunt 1 LOCAL group # 0, 1, 1, 1
+ut 0 LOCAL group # 0, 1, 1, 0
+labore LOCAL group # 0, 1, 1, undef
+et 1 LOCAL # 0, 1, 0, 1
+dolore 0 LOCAL # 0, 1, 0, 0
+magna LOCAL # 0, 1, 0, undef
+aliqua 1 group # 0, 0, 1, 1
+enim 0 group # 0, 0, 1, 0
+ad group # 0, 0, 1, undef
+minim 1 # 0, 0, 0, 1
+veniam 0 # 0, 0, 0, 0
+quis # 0, 0, 0, undef
