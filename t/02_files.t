@@ -16,7 +16,8 @@ my $file = 't/02_files.cf';
 ok (!$kw->readFile($file), "Run readFile on $file");
 ok ($kw->getFile($file) == $file, "Get current working file");
 ok (scalar(keys(%{$kw->{'rules'}})) == 2, "Fetched correct number of files in rules");
-ok ($kw->{'rules'}->{'50_02_T_02_FILES.cf'}, "Loaded correct output name");
+ok ($kw->{'rules'}->{$file}, "Loaded correct hash key");
+ok ($kw->{'filemap'}->{$file} =~ m/50_02_T_02_FILES.cf$/, "Loaded correct output name");
 ok (!$kw->clearFiles(), "Clear 'rules' hash");
 ok (!$kw->{'rules'}, "Fetched none after clearing");
 
