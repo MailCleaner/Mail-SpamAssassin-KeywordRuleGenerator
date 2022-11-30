@@ -31,7 +31,7 @@ Implemented as a module largely for testing purposes.
     use Mail::SpamAssassin::KeywordRuleGenerator;
     my $kw = Mail::SpamAssassin::KeywordRuleGenerator->new($id);
     $kw->readFile('keywords.cf');
-    $kw->writeFiles();
+    $kw->writeAll();
 
 =head1 DESCRIPTION
 
@@ -62,7 +62,7 @@ method. By default, the output file name and the rules therein will use a
 stripped and capitalized version of those filenames.
 
     $kw->readFiles( 'example.txt' );
-    $kw->writeFiles();
+    $kw->writeAll();
 
 This will creates rules formatted like:
 
@@ -72,7 +72,7 @@ and will output to the file:
 
     70_id_example.cf
 
-See the C<writeFile> method for more information on this formatting. Also see
+See the C<write*> methods for more information on this formatting. Also see
 the C<new> method for discussion of the 'id'.
 
 Finally, a like file:
@@ -134,20 +134,21 @@ our %EXPORT_TAGS = (
                 'setPriority',
                 'getOutfile',
                 'setOutfile',
-                'getScorefile',
-                'setScorefile',
+                'getGlobalOutfile',
+                'setGlobalOutfile',
+                'scorefile',
                 'clearFiles',
                 'getFiles',
                 'nextFile',
                 'readFile',
                 'getFile',
                 'setFile',
-                'joinRules',
-                'processMetas',
-                'processWords',
-                'processGroups',
-                'processAll',
-                'writeFile',
+                'createDir',
+                'cleanDir',
+                'writeMetas',
+                'writeWords',
+                'writeGroups',
+                'writeGlobals',
                 'writeAll'
         ]
 );
@@ -358,16 +359,19 @@ sub setFile
 
 =head2 C<$kw->getOutfile()>
 
-Getter for C<$kw->{'outfile'}>. 'outfile' represents the real filepath of the
-output file which is currently being processed.
+Getter for C<$kw->{'file'}>. 'file' represents the real filepath of the
+output file. With a single argument, the output file for that input file will be
+returned. Without an argument, the current working output file will be returned,
+if available).
 
 =cut
 
 sub getOutfile
 {
         my $self = shift;
+        my $file = shift || $self->{'file'};
 
-        if (defined($self->{'outfile'})) {
+        if (defined($self->{'filemap'}->{$file})) {
                 return $self->{'outfile'};
         }
 }
@@ -385,10 +389,10 @@ sub setOutfile
         my $path = shift;
 
         if (defined($path)) {
-                $self->{'outfile'} = $path || return "Failed to set $path";
+                $self->{'filemap'}->{$self->{'file'}} = $path || return "Failed to set $path";
         } else {
                 if ($self->{'singleOutfile'}) {
-                        $self->{'outfile'} = $self->{'priority'} .
+                        $self->{'filemap'}->{$self->{'file'}} = $self->{'dir'}."/".$self->{'priority'} .
                                 '_' . uc($self->{'id'}) .
                                 '.cf';
                 } else {
@@ -397,12 +401,115 @@ sub setOutfile
                         $file =~ s/(\.[^\.]*)$//g; # Remove extensions
                         $file = uc($file); # Convert to uppercase for rule names
 
-                        $self->{'outfile'} = $self->{'priority'} .
+                        $self->{'filemap'}->{$self->{'file'}} = $self->{'dir'}."/".$self->{'priority'} .
                                 '_' . uc($self->{'id'}) .
                                 '_' . $file . 
                                 '.cf';
                 }
         }
+}
+
+=head2 C<$kw->getGlobalOutfile();>
+
+Return the full path of the output file used for GLOBAL rules. If it is not yet
+defined, then C<setGlobalOutfile()> will be run first to try to set it. If this
+fails, then nothing will be returned.
+
+=cut
+
+sub getGlobalOutfile
+{
+        my $self = shift;
+        return $self->{'filemap'}->{'GLOBAL'} if (defined($self->{'filemap'}->{'GLOBAL'}));
+        my $ret = $self->setGlobalOutfile();
+        return $self->{'filemap'}->{'GLOBAL'} unless ($ret);
+}
+
+=head2 C<$kw->setGlobalOutfile($file);>
+
+Set the output file for global rules. This file must be either the same or
+alphabetically after the last file with 'meta' rules. C<$file> can be used to
+bypass that check, but it might lead to rules that do not work.
+
+Will try to select a filename as close to the existing output files as possible.
+First it will simply duplicate a name if it is in C<singleOutput> mode. Then,
+it will try to use the base name without the C<$file> portion. This will 
+generally not work because the '_' before the file will come after the dot
+without:
+
+    99_KW.cf
+    99_KW_FILE.cf
+    99_KW_FILE_SCORES.cf
+
+Next, if the priority is less than 99, it will simply increment that. Finally,
+if will try to double the first '_':
+
+    99__KW.cf
+
+If none of these techniques work, it will return an error.
+
+=cut
+
+sub setGlobalOutfile
+{
+        my $self = shift;
+        my $path = shift;
+
+        if (defined($path)) {
+                $self->{'filename'}->{'GLOBAL'} = $self->{'filemap'}->{(keys(%{$self->{'filemap'}}))[0]};
+                return undef;
+        }
+        if ($self->{'singleOutfile'}) {
+                $self->{'filename'}->{'GLOBAL'} = $self->{'filemap'}->{(keys(%{$self->{'filemap'}}))[0]};
+                return undef;
+        }
+        my $last;
+        foreach my $file (keys(%{$self->{'filemap'}})) {
+                $last = $file if (!defined($last) || $file gt $last);
+        }
+        my $file = $self->getDir().'/'.$self->getPriority()."_".$self->getId().".cf";
+        if ($file gt $last) {
+                $self->{'filename'}->{'GLOBAL'} = $file;
+                return undef;
+        }
+        if ($self->getPriority < 99) {
+                $self->{'filemap'}->{'GLOBAL'} = $self->getDir().'/'.($self->getPriority()+1)."_".$self->getId().".cf";
+                return undef;
+        }
+        $file =~ s/_/__/ unless ($file gt $last);
+        if ($file gt $last) {
+                $self->{'filename'}->{'GLOBAL'} = $file;
+                return undef;
+        }
+        return ("Cannot determine a valid GLOBAL output file\n");
+}
+
+=head2 C<$kw->scorefile($file);>
+
+Return the file to output scores for the current C<$file> or the one provided.
+A provided C<$file> will be checked against both the keys and values of the
+filemap.
+
+This will simply insert '_SCORES' just before the '.cf' extension.
+
+=cut
+
+sub scorefile
+{
+        my $self = shift;
+        my $file = shift || $self->getFile();
+
+        my $scorefile = $self->getOutfile($file);
+        unless (defined($scorefile)) {
+                foreach (keys(%{$self->{'filemap'}})) {
+                        if ($self->{'filemap'}->{$_} eq $file) {
+                                $scorefile = $file;
+                                last;
+                        }
+                }
+        }
+        $scorefile =~ s/\.cf$/_SCORES.cf/;
+        return $scorefile if ($scorefile =~ m/_SCORES\.cf$/);
 }
 
 =head2 C<$kw->getFiles($regex);>
@@ -513,10 +620,11 @@ sub readFile
         my $self = shift;
         my $file = shift || return 'No file provided';
         my %args = @_;
+        $self->getDir();
         $self->{'file'} = $file;
         $self->setOutfile();
-        my $n = 0;
 
+        my $n = 0;
         if (open(my $fh, '<', $file)) {
                 my $rules = 0;
                 while (<$fh>) {
@@ -530,20 +638,22 @@ sub readFile
                                         print "FOUND: '$word' '$score' " . (join(',',@groups)) . "\n";
                                 }
                                 foreach my $group (@groups) {
+                                        # Global rules must references the file where the component rule is located
                                         if ($group eq 'GLOBAL') {
-                                                push(@{$self->{'rules'}->{'GLOBAL'}}, $word);
+                                                $self->{'rules'}->{'GLOBAL'}->{$word} = $self->{'file'};
+                                        # Local rules have enough information from context to determine the component rule
                                         } else {
-                                                push(@{$self->{'rules'}->{$self->{'outfile'}}->{$group}}, $word);
+                                                push(@{$self->{'rules'}->{$self->{'file'}}->{$group}}, $word);
                                         }
                                 }
-                                $self->{'rules'}->{$self->{'outfile'}}->{'SCORED'}->{$word} = $score if ($score);
-                                $self->{'rules'}->{$self->{'outfile'}}->{'COMMENTS'}->{$word} = $comment if ($comment);
+                                $self->{'rules'}->{$self->{'file'}}->{'SCORED'}->{$word} = $score if ($score);
+                                $self->{'rules'}->{$self->{'file'}}->{'COMMENTS'}->{$word} = $comment if ($comment);
                         } elsif ($self->{debug}) {
                                 print STDERR "ERROR: Invalid input in $file, line $n: $_\n";
                         }
                 }
-                print STDERR "No rules found in $file\n" unless ($self->{'rules'}->{$self->{'outfile'}} || !$self->{'debug'});
-                return "No rules found in $file\n" unless ($self->{'rules'}->{$self->{'outfile'}});
+                print STDERR "No rules found in $file\n" unless ($self->{'rules'}->{$self->{'file'}} || !$self->{'debug'});
+                return "No rules found in $file\n" unless ($self->{'rules'}->{$self->{'file'}});
         } else {
                 delete($self->{'file'});
                 return "Failed to read $file";
@@ -623,7 +733,7 @@ sub readLine
                         } elsif (defined($word) && $section =~ m/^(\d+(?:\.\d+)?)$/ && !defined($score)) {
                                 $score = $section;
                         } elsif (defined($word) && $section =~ m/^([^\d\s#]+)$/) {
-                                push(@groups, $section);
+                                push(@groups, uc($section));
                         } elsif (defined($word) && $section =~ m/^#.*$/ && !defined($comment)) {
                                 $comment = $section;
                                 $comment =~ s/^#\s*//;
@@ -647,62 +757,6 @@ sub readLine
         return ();
 }
 
-=head2 C<$kw->joinRules(%rules)>
-
-Merge rules hash into working output hash. Generally called from C<readFile>,
-but if you want to add rules manually, it will require the following format:
-
-{
-        'word' => {
-                'score' => 0,
-                'groups' => ( 'LOCAL' )
-        },
-        'other' => {
-                'score' => 1,
-                'groups' => ( 'GLOBAL', 'group' )
-        }
-}
-
-The main context object will provide the working 'ID', 'FILE' and other
-attributes necessary to nest these rules in the existing hash.
-
-=cut
-
-sub joinRules
-{
-        my $self = shift;
-        my %rules = @_;
-
-        if ($self->{'unified'}) {
-                $self->{'rules'}->{$self->{'id'}}->{$self->{'file'}}->{'out'} = $self->{'priority'}.'_'.$self->{'id'}.'.cf';
-        } else {
-                $self->{'rules'}->{$self->{'id'}}->{$self->{'file'}}->{'out'} = $self->{'priority'}.'_'.$self->{'id'}.'_'.$self->{'file'}.'.cf';
-        }
-        foreach my $word (keys(%rules)) {
-                my $score = $rules{$word}{'score'} || 0;
-                my @groups = $rules{$word}{'groups'} || ( 'GLOBAL' );
-                if ($score) {
-                        $self->{'rules'}->{$self->{'id'}}->{$self->{'file'}}->{'words'}->{$word} = $score;
-                }
-                foreach my $group (@groups) {
-                        if ($group eq 'GLOBAL') {
-                                if (scalar(keys(%{$self->{'rules'}->{$self->{'id'}}->{'GLOBAL'}}))) {
-                                        push(@{$self->{'rules'}->{$self->{'id'}}->{'GLOBAL'}}, $word);
-                                } else {
-                                        $self->{'rules'}->{$self->{'id'}}->{'GLOBAL'} = ( $word );
-                                }
-                                next;
-                        }
-                        if (scalar(keys(%{$self->{'rules'}->{$self->{'id'}}->{$self->{'file'}}->{'groups'}->{$group}}))) {
-                                push(@{$self->{'rules'}->{$self->{'id'}}->{$self->{'file'}}->{'groups'}->{$group}}, $word);
-                        } else {
-                                $self->{'rules'}->{$self->{'id'}}->{$self->{'file'}}->{'groups'}->{$group} = ( $word );
-                        }
-                }
-        }
-        return 0;
-}
-
 =head2 C<$kw->processMetas($outfile, $file);>
 
 Create all of the component meta rules for the declared C<$file>. Those that
@@ -719,7 +773,6 @@ that the they appear before the 'GLOBAL' file (without '_C<$file>' at the end).
 sub processMetas
 {
         my $self = shift;
-        my $outfile = shift;
         my $file = shift;
         my $rules = shift;
 
@@ -739,7 +792,7 @@ sub processMetas
                 }
         }
         foreach my $word (@words) {
-                $self->{'output'}->{$outfile} .=
+                $self->{'output'}->{$file} .=
                         "body\t__".$prefix."_".uc($word)."_BODY\t/\\b".$word."\\b/\n" .
                         "header\t__".$prefix."_".uc($word)."_SUBJ\tSubject =~ /\\b".$word."\\b/\n" .
                         "meta\t__".$prefix."_".uc($word)."\t( __".$prefix."_".uc($word)."_BODY || __".$prefix."_".uc($word)."_SUBJ )\n\n";
@@ -747,61 +800,244 @@ sub processMetas
 
 }
 
-=head2 C<$kw->processWords($outfile,%args);>
+=head2 C<$kw->getPrefix($file);>
 
-Take a list of words with scores and add them to C<$outfile>.
+Return a standardized rule prefix using C<id> and C<file>.
 
 =cut
 
-sub processWords
+sub getPrefix
 {
         my $self = shift;
-        my $out = shift;
+        my $id = $self->getId();
+        my $file = $self->getFile();
+        $file =~ s/(?:.*\/)*(.*)\.cf/$1/;
+        return uc($id."_".$file);
 }
 
-=head2 C<$kw->processGroup(%args);>
+=head2 C<$kw->writeMetas($file);>
 
-Take a single group, including 'GLOBAL' and add it to C<$outfile>.
+Write component rules for file in the current file, or one set by C<$file> to
+make them available to all other rule types.
+
+These are a match for each word across all groups and 'SCORED' in the body and
+subject header, then a 'meta' rule to connect them.
+
+    body        __KW_FILE_WORD_BODY /\bword\b/
+    header      __KW_FILE_WORD_SUBJ Subject =~ /\bword\b/
+    meta        __KW_FILE_WORD ( __KW_FILE_WORD_BODY || __KW_FILE_WORD_SUBJ )
 
 =cut
 
-sub processGroup
+sub writeMetas
 {
         my $self = shift;
-        my $outfile = shift;
+        my $file = shift || $self->getFile();
 
-        for (my $i = 0; $i < scalar(@all); $i++) {
-                $files->{$self->{'priority'}.'_'.$self->{'id'}.'cf'} .=
-                        "meta\t".$self->{'id'}."_".$i."\t( ".join(' + ',@all)." ) > $i\n" .
-                        "describe\tMatched ".($i+1)."of keywords: ".join(', ',@{$self->{'rules'}->{$self->{'id'}}->{'GLOBAL'}})."\n\n";
+        if ($self->{'singleOutfile'}) {
+                print(
+"############".('#'*length($self->{'rules'}->{$file}->{'PREFIX'}))."#\n".
+"# Metas for ".$self->{'rules'}->{$file}->{'PREFIX'}."\n".
+"############".('#'*length($self->{'rules'}->{$file}->{'PREFIX'}))."#\n\n"
+                );
+        }
+        print("# ".$self->{'rules'}->{$file}->{'COMMENTS'}->{$_}."\n");
+        my %uniq = %{$self->{'rules'}->{$file}} || ();
+        foreach my $group ( keys(%{$self->{'rules'}->{$file}}) ) {
+                next if ($group eq 'COMMENT' || $group eq 'SCORED');
+                foreach ( @{$self->{'rules'}->{$file}->{'SCORED'}} ) {
+                        $uniq{$_} = 0 unless (defined($uniq{$_}));
+                }
+        }
+        my $output;
+        foreach ( sort(keys(%uniq)) ) {
+                if (defined($self->{'rules'}->{$file}->{'COMMENTS'}->{$_})) {
+                        print("# ".$self->{'rules'}->{$file}->{'COMMENTS'}->{$_}."\n");
+                }
+                print("body        __".$self->{'rules'}->{$file}->{'PREFIX'}."_".uc($_).'_BODY /\b'.$_.'\b/'."\n");
+                print("header      __".$self->{'rules'}->{$file}->{'PREFIX'}."_".uc($_).'_SUBJ Subject =~ /\b'.$_.'\b/'."\n");
+                print("meta        __".$self->{'rules'}->{$file}->{'PREFIX'}."_".uc($_)." ( __".$self->{'rules'}->{$file}->{'PREFIX'}."_BODY || __".$self->{'rules'}->{$file}->{'PREFIX'}."_SUBJ )\n\n");
         }
 }
 
-=head2 C<$kw->processAll(%args);>
+=head2 C<$kw->writeWords($file);>
 
-Process all groups.
+Write 'SCORED' word rules for file in the current file, or one set by C<$file>.
+
+These are simply a 'meta' rule for only the existing component rule (the same
+rule with a '__' prefix).
+
+    meta        KW_FILE_WORD ( __KW_FILE_WORD )
+    score       KW_FILE_WORD 1.0
 
 =cut
 
-sub processAll
+sub writeWords
 {
         my $self = shift;
-        my %args = @_;
+        my $file = shift || $self->getFile();
 
-        $self->{'output'} = {};
-        foreach my $id (keys(%{$self->{'rules'}})) {
-                $self->processMetas($self->{'priority'}.'_'.$id.'.cf','GLOBAL',$self->{'rules'}->{$id});
-                $self->processGroups($self->{'priority'}.'_'.$id.'.cf','GLOBAL',$self->{'rules'}->{$id});
-                $self->processWords($self->{'priority'}.'_'.$id.'.cf','GLOBAL',$self->{'rules'}->{$id});
-                foreach my $file (keys(%{$self->{'rules'}->{$id}})) {
-                        $self->processMetas($self->{'priority'}.'_'.$id.'_'.$file.'.cf','GLOBAL',$self->{'rules'}->{$id});
-                        $self->processGroups($self->{'priority'}.'_'.$id.'_'.$file.'.cf','GLOBAL',$self->{'rules'}->{$id});
-                        $self->processWords($self->{'priority'}.'_'.$id.'_'.$file.'.cf','GLOBAL',$self->{'rules'}->{$id});
+        if ($self->{'singleOutfile'}) {
+                print(
+"############".('#'*length($self->{'rules'}->{$file}->{'PREFIX'}))."#\n".
+"# Words for ".$self->{'rules'}->{$file}->{'PREFIX'}."\n".
+"############".('#'*length($self->{'rules'}->{$file}->{'PREFIX'}))."#\n\n"
+                );
+        }
+        foreach ( keys(%{$self->{'rules'}->{$file}->{'SCORED'}->{$_}}) ) {
+                print("meta        ".$self->{'rules'}->{$file}->{'PREFIX'}."_".uc($_).
+                        " ( __".$self->{'rules'}->{$file}->{'PREFIX'}."_".uc($_)." )\n"
+                );
+                if (defined($self->{'rules'}->{$file}->{'COMMENTS'}->{$_})) {
+                        print("describe    ".$self->{'rules'}->{$file}->{'PREFIX'}."_".uc($_)." ".
+                                $self->{'rules'}->{$file}->{'COMMENTS'}->{$_}."\n"
+                        );
+                }
+                print("score       ".$self->{'rules'}->{$file}->{'PREFIX'}."_".uc($_)." ".
+                        $self->{'rules'}->{$file}->{'SCORED'}->{$_}."\n\n"
+                );
+        }
+}
+
+=head2 C<$kw->writeGroups($file);>
+
+Write group rules for file in the current file, or one set by C<$file>. These
+are a list of 'meta' rules where the component rules are all of the 'meta's in
+the group for each of the available match counts.
+
+    meta        KW_FILE_GROUP_1 ( ( __KW_WORD1 + __KW_WORD2 ) >= 1 )
+    describe    KW_FILE_GROUP_1 Found 1 word(s) from GROUP
+    score       KW_FILE_GROUP_1 0.01
+
+    meta        KW_FILE_GROUP_2 ( ( __KW_WORD1 + __KW_WORD2 ) >= 2 )
+    describe    KW_FILE_GROUP_2 Found 2 word(s) from GROUP
+    score       KW_FILE_GROUP_2 0.01
+
+=cut
+
+sub writeGroups
+{
+        my $self = shift;
+        my $file = shift || $self->getFile();
+
+        my $prefix = $self->{'rules'}->{$file}->{'PREFIX'};
+        if ($self->{'singleOutfile'}) {
+                print(
+"#############".('#'*length($prefix))."#\n".
+"# Groups for ".$prefix."\n".
+"#############".('#'*length($prefix))."#\n\n"
+                );
+        }
+        foreach my $group ( keys(%{$self->{'rules'}->{$file}}) ) {
+                next if ( $group eq 'COMMENT' || $group eq 'SCORED' );
+                print("# $group\n");
+                my $gprefix = $prefix;
+                unless ($group eq 'LOCAL') {
+                        $gprefix .= $group;
+                }
+                my $start = "meta        ".$gprefix."_";
+                my $words = " ( ( ";
+                foreach my $word ( keys(%{$self->{'rules'}->{$file}->{$group}}) ) {
+                        $words .= "__".$prefix."_".$word." + ";
+                }
+                $words =~ s/\+ $/\) >= /;
+                for (my $i = 1; $i <= scalar(@{$self->{'rules'}->{$file}->{$group}}); $i++) {
+                        my $line = $start.$i.$words.$i." )\n";
+                        print($line."\n".
+                                "describe    ".$gprefix."_".$i." Found $i GLOBAL word(s) from ".$prefix."\n"
+                        );
+                        print("score       ".$gprefix."_".$i. " 0.01\n\n");
                 }
         }
 }
 
-=head2 C<$kw->writeFiles($out_dir)>
+=head2 C<$kw->writeGlobals();>
+
+Write 'GLOBAL' group rules. Similar to C<writeGroups> except that component
+rules must be included from external files.
+
+    meta        KW_1 ( ( __KW_FILE1_WORD + __KW_FILE2_WORD ) >= 1 )
+    describe    KW_1 Found 1 GLOBAL word(s) from KW
+    score       KW_1 0.01
+
+    meta        KW_2 ( ( __KW_FILE1_WORD + __KW_FILE2_WORD ) >= 2 )
+    describe    KW_2 Found 2 GLOBAL word(s) from KW
+    score       KW_2 0.01
+
+=cut
+
+sub writeGlobals
+{
+        my $self = shift;
+
+        my $outfile = $self->getGlobalOutfile();
+        print(
+"##########\n".
+"# Globals\n".
+"##########\n\n"
+        );
+        my $prefix = $self->getId();
+        my $start = "meta        ".$prefix."_";
+        my $words = " ( ( ";
+        foreach my $word ( keys(%{$self->{'rules'}->{'GLOBAL'}}) ) {
+                $words .= "__".$self->{'rules'}->{'GLOBAL'}->{$word}."_".$word." + ";
+        }
+        $words =~ s/\+ $/\) >= /;
+        for (my $i = 1; $i <= scalar(@{$self->{'rules'}->{'GLOBAL'}}); $i++) {
+                my $line = $start.$i.$words.$i." )\n";
+                print($line."\n".
+                        "describe    ".$prefix."_".$i." Found $i GLOBAL word(s) from ".$prefix."\n"
+                );
+                print("score       ".$prefix."_".$i. " 0.01\n\n");
+        }
+}
+
+sub writeScores
+{
+        my $self = shift;
+        my $path = shift;
+}
+
+sub getDir
+{
+        my $self = shift;
+        my $dir = $self->{'dir'} || $self->setDir();
+        return $dir;
+}
+
+sub setDir
+{
+        my $self = shift;
+        my $dir = shift || ("$ENV{'PWD'}/$self->{'id'}");
+        $self->{'dir'} = $dir;
+}
+
+sub createDir
+{
+        my $self = shift;
+        my $dir = shift || $self->getDir();
+        unless (-d $dir) {
+                mkdir($dir) || return "Failed to mkdir '$dir'";
+        }
+        return undef;
+}
+
+sub cleanDir
+{
+        my $self = shift;
+        my @files = @_ || (keys(%{$self->{'filemap'}}));
+        foreach my $file (@files) {
+                if (-e $self->{'filemap'}->{$file}) {
+                        if ($self->{'debug'}) {
+                                print STDERR "Removing old file ".$self->{'filemap'}->{$file}."\n";
+                                print "Removing old file ".$self->{'filemap'}->{$file}."\n";
+                                #unlink($self->{'dir'}.'/'.$self->{'filemap'}->{'file'}) || die "Output file '".$self->{'filemap'}->{$file}."' already exists and could not be deleted\n";
+                        }
+                }
+        }
+}
+
+=head2 C<$kw->writeAll($dir)>
 
 Output files will use the name of each input file, stripping any extension, and
 forcing the name to uppercase. Rules in each file will be called:
@@ -824,22 +1060,26 @@ body for that word.
 
 =cut
 
-sub writeFiles
+sub writeAll
 {
         my $self = shift;
-        foreach my $out (keys(%{$self->{'rules'}})) {
-                unless ($self->{'joinScores'}) {
-                        $file =~ s/(.*)\.cf/$1_SCORES.cf/;
-                        print STDERR $self->{'scores'};
-                }
-                if (open(my $fh, '>', $out)) {
-                        print $fh $self->{'output'}->{$out};
-                        close($fh);
-                } else {
-                        print STDERR "Failed to write $out\n";
-                }
-        }
+        my @written;
 
+        $self->cleanDir() if (-d $self->getDir());
+        $self->createDir() unless (-d $self->getDir());
+
+        foreach my $file (keys(%{$self->{'rules'}})) {
+                # Reserve GLOBAL for last
+                if ($file eq 'GLOBAL') {
+                        next;
+                }
+                $self->setFile($file);
+                $self->writeMetas();
+                $self->writeWords();
+                $self->writeGroups();
+                $self->writeScores();
+        }
+        $self->writeGlobals();
         return 0;
 }
 
