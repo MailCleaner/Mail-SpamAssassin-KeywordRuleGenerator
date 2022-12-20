@@ -20,26 +20,18 @@ my ( $missing, $extra, $incorrect ) = 0;
 use Data::Dump;
 foreach my $file (keys(%{$expected})) {
         if ($file eq 'GLOBAL') {
-                my ($m, $e) = compareGroups(
+                my ($m, $e) = compareValues(
                         $expected->{$file},
                         $kw->{'rules'}->{$file}
                 );
-                print("Missing $m words\n") if ($m);
-                print("$e extra words\n") if ($e);
+                print("Missing $m words in GLOBAL\n") if ($m);
+                print("$e extra words in GLOBAL\n") if ($e);
                 $missing += $m;
                 $extra += $e;
         } else {
                 foreach my $group (keys(%{$expected->{$file}})) {
-                        if ($group eq 'SCORED') {
-                                my ($m, $e, $i) = compareScores(
-                                        $expected->{$file}->{$group},
-                                        $kw->{'rules'}->{$file}->{$group}
-                                );
-                                $missing += $m;
-                                $extra += $e;
-                                $incorrect += $i;
-                        } elsif ($group eq 'COMMENTS') {
-                                my ($m, $e, $i) = compareScores(
+                        if ($group eq 'SCORED' || $group eq 'COMMENTS') {
+                                my ($m, $e, $i) = compareValues(
                                         $expected->{$file}->{$group},
                                         $kw->{'rules'}->{$file}->{$group}
                                 );
@@ -47,7 +39,7 @@ foreach my $file (keys(%{$expected})) {
                                 $extra += $e;
                                 $incorrect += $i;
                         } else {
-                                my ($m, $e) = compareGroups(
+                                my ($m, $e) = compareLists(
                                         $expected->{$file}->{$group},
                                         $kw->{'rules'}->{$file}->{$group}
                                 );
@@ -64,7 +56,7 @@ ok ($incorrect == 0, "No incorrect scores are found");
 
 done_testing();
 
-sub compareGroups
+sub compareLists
 {
         my $expect = shift;
         my $loaded = shift;
@@ -75,7 +67,7 @@ sub compareGroups
 
         while (scalar(@e)) {
                 unless (scalar(@l)) {
-                        print("extra words @l\n");
+                        print("extra words @e\n");
                         $extra += scalar(@e);
                         last;
                 }
@@ -106,7 +98,7 @@ sub compareGroups
         return ($missing, $extra);
 }
 
-sub compareScores
+sub compareValues
 {
         my $expect = shift;
         my $loaded = shift;
@@ -114,11 +106,11 @@ sub compareScores
         my %remaining = %{$loaded};
         my ($missing, $extra, $incorrect) = (0, 0, 0);
         foreach my $word (keys(%$expect)) {
-                if (!defined($loaded->{$word})) {
-                        print("Missing score assignment for $word\n");
+                if (!defined($loaded->{$word}) && defined($expect->{$word}) && $expect->{$word} != 0) {
+                        print("Missing value assignment for $word\n");
                         $missing++;
                 } elsif ($expect->{$word} != $loaded->{$word}) {
-                        print("Incorrect score assignment for $word\n");
+                        print("Incorrect value assignment for $word\n");
                         $incorrect++;
                 } else {
                         delete($remaining{$word});
@@ -133,39 +125,39 @@ sub compareScores
 sub getExpected
 {
         my %expected = (
-                'GLOBAL' => [
-                        'lorem',
-                        'ipsum',
-                        'dolor',
-                        'sit',
-                        'amet',
-                        'consectetur',
-                        'adipiscing',
-                        'elit',
-                        'sed',
-                        'do',
-                        'eiusmod',
-                        'tempor',
-                        'minim',
-                        'veniam',
-                        'quis',
-                        'nostrud',
-                        'exercitation',
-                        'ullamco',
-                        'laboris',
-                        'nisi',
-                        'ut',
-                        'aliquip',
-                        'ex',
-                        'ea',
-                        'commodo',
-                        'consequat',
-                        'duis',
-                        'dolore',
-                        'eu',
-                        'fugiat',
-                ],
-                '50_04_T_04_RULES0.cf' => {
+                'GLOBAL' => {
+                        'lorem' => 't/04_rules0.cf',
+                        'ipsum' => 't/04_rules0.cf',
+                        'dolor' => 't/04_rules0.cf',
+                        'sit' => 't/04_rules0.cf',
+                        'amet' => 't/04_rules0.cf',
+                        'consectetur' => 't/04_rules0.cf',
+                        'adipiscing' => 't/04_rules0.cf',
+                        'elit' => 't/04_rules0.cf',
+                        'sed' => 't/04_rules0.cf',
+                        'do' => 't/04_rules0.cf',
+                        'eiusmod' => 't/04_rules0.cf',
+                        'tempor' => 't/04_rules0.cf',
+                        'minim' => 't/04_rules0.cf',
+                        'veniam' => 't/04_rules0.cf',
+                        'quis' => 't/04_rules0.cf',
+                        'nostrud' => 't/04_rules1.cf',
+                        'exercitation' => 't/04_rules1.cf',
+                        'ullamco' => 't/04_rules1.cf',
+                        'laboris' => 't/04_rules1.cf',
+                        'nisi' => 't/04_rules1.cf',
+                        'ut' => 't/04_rules1.cf',
+                        'aliquip' => 't/04_rules1.cf',
+                        'ex' => 't/04_rules1.cf',
+                        'ea' => 't/04_rules1.cf',
+                        'commodo' => 't/04_rules1.cf',
+                        'consequat' => 't/04_rules1.cf',
+                        'duis' => 't/04_rules1.cf',
+                        'dolore' => 't/04_rules1.cf',
+                        'eu' => 't/04_rules1.cf',
+                        'fugiat' => 't/04_rules1.cf',
+                },
+                't/04_rules0.cf' => {
                         'SCORED' => {
                                 'lorem' => 1,
                                 'sit' => 1,
@@ -219,7 +211,7 @@ sub getExpected
                                 'veniam',
                                 'quis',
                         ],
-                        'group' => [
+                        'GROUP' => [
                                 'lorem',
                                 'ipsum',
                                 'dolor',
@@ -234,7 +226,7 @@ sub getExpected
                                 'ad',
                         ]
                 },
-                '50_04_T_04_RULES1.cf' => {
+                't/04_rules1.cf' => {
                         'SCORED' => {
                                 'nostrud' => 1,
                                 'laboris' => 1,
@@ -262,7 +254,7 @@ sub getExpected
                                 'eu',
                                 'fugiat',
                         ],
-                        'group' => [
+                        'GROUP' => [
                                 'nostrud',
                                 'exercitation',
                                 'ullamco',
