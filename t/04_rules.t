@@ -17,7 +17,6 @@ ok(!scalar(@failed), "Load 'rules' hash with readAll");
 
 my $expected = getExpected();
 my ( $missing, $extra, $incorrect ) = 0;
-use Data::Dump;
 foreach my $file (keys(%{$expected})) {
         if ($file eq 'GLOBAL') {
                 my ($m, $e) = compareValues(

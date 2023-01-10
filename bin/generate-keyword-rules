@@ -1,0 +1,34 @@
+#!/usr/bin/perl
+
+# Create a directory called 'output' with generated files for all config files in the $PWD
+
+use lib '../lib/';
+use Mail::SpamAssassin::KeywordRuleGenerator;
+
+use strict;
+use warnings;
+
+my $id = 'MC';
+my $dir = 'output';
+
+# setup
+my $kw = Mail::SpamAssassin::KeywordRuleGenerator->new( { 'id' =>$id, 'debug' => 0, 'joinScores' => 0 , 'dir' => $dir } );
+
+# clean
+unlink(glob("$dir/*"));
+rmdir($dir);
+
+# get files in PWD
+my @files = glob("./*");
+my @clean;
+
+$kw->createDir($dir);
+
+my @failed = $kw->readAll( @files );
+die scalar(@failed)." error(s) - ".join(', ', @failed)."\n" if (scalar(@failed));
+$kw->writeAll();
+
+use Mail::SpamAssassin;
+my $sa = Mail::SpamAssassin->new( { 'site_rules_filename' => "./$dir", 'pre_config_text' => "loadplugin Mail::SpamAssassin::Plugin::Check" } );
+my $fail = $sa->lint_rules();
+die "Failed to verify with SpamAssassin: $fail" if ($fail);

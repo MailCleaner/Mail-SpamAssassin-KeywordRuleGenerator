@@ -16,7 +16,7 @@ my $defaults = {
 };
 
 my $args = {
-        'id'            => '01',
+        'id'            => 'TEST',
         'priority'      => 10,
         'debug'         => 1,
         'singleOutfile' => 1,

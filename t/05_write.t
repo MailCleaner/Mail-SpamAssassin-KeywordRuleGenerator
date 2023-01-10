@@ -46,10 +46,8 @@ foreach (@files) {
 }
 ok (!scalar(keys(%remaining)), "All expected output files found");
 
-use Mail::SpamAssassin;
-my $sa = Mail::SpamAssassin->new( { 'site_rules_filename' => $testdir } );
-$failed = $sa->lint_rules();
-ok (!$failed, "Verified by spamassassin".($res ? "\n$failed" : ""));
+$failed = $kw->verifyOutput();
+ok (!$failed, "Verified by spamassassin".($failed ? "\n$failed" : ""));
 
 $kw->cleanDir();
 
